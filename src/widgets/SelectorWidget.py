@@ -1,6 +1,7 @@
 # vim: set expandtab shiftwidth=4 softtabstop=4:
 
 # General
+import math
 from functools import partial
 from superqt import QDoubleRangeSlider
 
@@ -29,13 +30,14 @@ class SelectorWidget(QWidget):
     selectionChanged = Signal()
     deleted = Signal(object)
 
-    def __init__(self, attributes, minima, maxima, constant, idx=0, mini=None, maxi=None, parent=None):
+    def __init__(self, attributes, minima, maxima, constant, value_labels=None, idx=0, mini=None, maxi=None, parent=None):
         super().__init__(parent=parent)
 
         self.attributes = attributes
         self.minima = minima
         self.maxima = maxima
         self.attribute_constant = constant
+        self.value_labels = value_labels if value_labels is not None else {}
         self._idx = idx
         self.active = True
 
@@ -82,8 +84,8 @@ class SelectorWidget(QWidget):
 
         # Slider Line 1
         self._slider_min_max_layout = QHBoxLayout()
-        self.min_label = QLabel("{:.4f}".format(self.minimum))
-        self.max_label = QLabel("{:.4f}".format(self.maximum))
+        self.min_label = QLabel(self._format_label(value_low, side="lower"))
+        self.max_label = QLabel(self._format_label(value_high, side="upper"))
         self._slider_min_max_layout.addWidget(self.min_label, alignment=Qt.AlignmentFlag.AlignLeft)
         self._slider_min_max_layout.addWidget(self.max_label, alignment=Qt.AlignmentFlag.AlignRight)
 
@@ -178,6 +180,53 @@ class SelectorWidget(QWidget):
     def constant(self):
         return self.attribute_constant[self._idx]
 
+    def _current_value_labels(self):
+        return self.value_labels.get(self.attributes[self._idx], {})
+
+    def _format_label(self, value, side=None):
+        attribute_labels = self._current_value_labels()
+        if attribute_labels:
+            label = self._label_for_value(attribute_labels, value, side=side)
+            if label is not None:
+                return label
+
+        return "{:.4f}".format(value)
+
+    @staticmethod
+    def _label_for_value(labels, value, side=None):
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            return labels.get(value)
+
+        if side == "lower":
+            index_value = math.ceil(numeric_value)
+        elif side == "upper":
+            index_value = math.floor(numeric_value)
+        else:
+            index_value = round(numeric_value)
+
+        lookup_values = [
+            value,
+            numeric_value,
+            index_value,
+            float(index_value),
+            str(index_value),
+        ]
+        for lookup_value in lookup_values:
+            if lookup_value in labels:
+                return labels[lookup_value]
+
+        return None
+
+    def _set_value_labels(self, lower, upper):
+        if self._current_value_labels():
+            self.min_label.setText(self._format_label(lower, side="lower"))
+            self.max_label.setText(self._format_label(upper, side="upper"))
+        else:
+            self.min_label.setText(self._format_label(self.minimum))
+            self.max_label.setText(self._format_label(self.maximum))
+
     def get_selection(self):
         name = self.attribute_box.currentText()
         if self.DEBUG:
@@ -234,8 +283,7 @@ class SelectorWidget(QWidget):
             self.slider.setValue((self.minimum, self.maximum))
         self.slider.blockSignals(prev)
 
-        self.min_label.setText("{:.4f}".format(self.minimum))
-        self.max_label.setText("{:.4f}".format(self.maximum))
+        self._set_value_labels(self.minimum, self.maximum)
 
         prev = self.lower_edit.blockSignals(True)
         prev1 = self.upper_edit.blockSignals(True)
@@ -256,6 +304,7 @@ class SelectorWidget(QWidget):
         self.upper_edit.setText("{:.4f}".format(value[1]))
         self.lower_edit.blockSignals(prev)
         self.upper_edit.blockSignals(prev1)
+        self._set_value_labels(value[0], value[1])
 
         self._emit_selection_changed()
 
@@ -278,6 +327,7 @@ class SelectorWidget(QWidget):
         prev = self.slider.blockSignals(True)
         self.slider.setValue((lower, upper))
         self.slider.blockSignals(prev)
+        self._set_value_labels(lower, upper)
         self._emit_selection_changed()
 
     def _emit_selection_changed(self):

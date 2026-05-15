@@ -37,6 +37,7 @@ class SelectionTableWidget(QWidget):
         self.attributes = None
         self.minima = None
         self.maxima = None
+        self.value_labels = {}
 
         self._mode = "show"
         self._selectors = []
@@ -121,6 +122,7 @@ class SelectionTableWidget(QWidget):
         self.attributes = attr
         self.minima = min
         self.maxima = max
+        self.value_labels = self._attribute_value_labels(self.partlist, self.attributes)
         self.attribute_constant = [False]*len(self.attributes)
 
         for idx, mini in enumerate(self.minima):
@@ -224,6 +226,7 @@ class SelectionTableWidget(QWidget):
                                 self.minima,
                                 self.maxima,
                                 self.attribute_constant,
+                                value_labels=self.value_labels,
                                 idx=idx,
                                 mini=mini,
                                 maxi=maxi)
@@ -232,6 +235,23 @@ class SelectionTableWidget(QWidget):
         self.selectors_vbox.addWidget(widget, alignment=Qt.AlignmentFlag.AlignTop)
         widget.selectionChanged.connect(self._selector_modified)
         widget.deleted.connect(self._selector_deleted)
+
+    def _attribute_value_labels(self, partlist, attributes):
+        labels = {}
+
+        if "rlnTomoName" not in attributes:
+            return labels
+
+        tomo_number_to_name = getattr(partlist.data, "tomo_number_to_name", None)
+        if not tomo_number_to_name:
+            return labels
+
+        labels["rlnTomoName"] = {
+            number: "{}, {}".format(number, name)
+            for number, name in tomo_number_to_name.items()
+        }
+
+        return labels
 
     def _mode_switched(self):
         """
