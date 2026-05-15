@@ -8,6 +8,18 @@ class ArtiaXSaveDialog(MainSaveDialog):
         super().__init__(settings)
         self.category = category
 
+    def _command_format_name(self, session, fmt):
+        category_formats = [
+            f for f in session.data_formats.formats
+            if f.category == self.category
+        ]
+
+        for nickname in fmt.nicknames:
+            if sum(nickname in f.nicknames for f in category_formats) == 1:
+                return nickname
+
+        return fmt.nicknames[0] if fmt.nicknames else fmt.name
+
     def display(self, session, *, parent=None, format=None, initial_directory=None, initial_file=None):
         if parent is None:
             parent = session.ui.main_window
@@ -39,11 +51,10 @@ class ArtiaXSaveDialog(MainSaveDialog):
         provider_info = save_mgr.provider_info(fmt)
         from chimerax.core.commands import run, SaveFileNameArg, StringArg
         fname = self._add_missing_file_suffix(dialog.selectedFiles()[0], fmt)
-        cmd = "save %s" % SaveFileNameArg.unparse(fname)
+        format_name = StringArg.unparse(self._command_format_name(session, fmt))
+        cmd = "save %s format %s" % (SaveFileNameArg.unparse(fname), format_name)
         if provider_info.bundle_info.installed and self._current_option != self._no_options_label:
             cmd += ' ' + save_mgr.save_args_string_from_widget(fmt, self._current_option)
-        if not provider_info.is_default:
-            cmd += ' format ' + fmt.nicknames[0]
         run(session, cmd)
         if self._settings:
             self._settings.format_name = fmt.name

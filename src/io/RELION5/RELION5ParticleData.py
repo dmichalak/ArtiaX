@@ -819,7 +819,7 @@ class RELION5SaveArgsWidget(SaveArgsWidget):
     def additional_content(
         self,
     ):
-        from Qt.QtWidgets import QLineEdit, QLabel, QHBoxLayout, QVBoxLayout, QGroupBox, QCheckBox, QToolButton
+        from Qt.QtWidgets import QLineEdit, QLabel, QHBoxLayout, QVBoxLayout, QGroupBox, QCheckBox, QToolButton, QButtonGroup
         from ...widgets.NLabelValue import NLabelValue
         from ...widgets.IgnorantComboBox import IgnorantComboBox
 
@@ -941,6 +941,12 @@ class RELION5SaveArgsWidget(SaveArgsWidget):
         # Checkboxes
         self._split_checkbox = QCheckBox("Create File with Prior")
         self._nosplit_checkbox = QCheckBox("Create File without Prior")
+        self._nosplit_checkbox.setChecked(True)
+
+        self._prior_button_group = QButtonGroup(self)
+        self._prior_button_group.setExclusive(True)
+        self._prior_button_group.addButton(self._split_checkbox)
+        self._prior_button_group.addButton(self._nosplit_checkbox)
 
         # Question mark icon with tooltip
         self._help_button_prior_true = QToolButton()
