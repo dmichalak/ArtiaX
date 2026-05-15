@@ -19,6 +19,32 @@ EPSILON = np.finfo(np.float32).eps
 EPSILON16 = 16 * EPSILON
 
 
+def _tomogram_name_number_maps(names):
+    name_to_number = {}
+    number_to_name = {}
+    numbers = []
+
+    for raw_name in names:
+        name = str(raw_name)
+        if name not in name_to_number:
+            number = len(name_to_number) + 1
+            name_to_number[name] = number
+            number_to_name[number] = name
+
+        numbers.append(name_to_number[name])
+
+    return numbers, name_to_number, number_to_name
+
+
+def _mapped_tomogram_name(number, number_to_name):
+    try:
+        key = int(float(number))
+    except (TypeError, ValueError):
+        return None
+
+    return number_to_name.get(key)
+
+
 class RELIONEulerRotation(EulerRotation):
 
     def __init__(self):
@@ -122,6 +148,8 @@ class RELIONParticleData(ParticleData):
         self.loop_name = 0
         self.name_prefix = None
         self.name_leading_zeros = None
+        self.tomo_name_to_number = {}
+        self.tomo_number_to_name = {}
 
         super().__init__(
             session,
@@ -160,39 +188,27 @@ class RELIONParticleData(ParticleData):
 
         # Do we have tomo names?
         names_present = False
+        name_numbers = {}
         if "rlnTomoName" in df_keys:
             names = list(df["rlnTomoName"])
+            (
+                _,
+                self.tomo_name_to_number,
+                self.tomo_number_to_name,
+            ) = _tomogram_name_number_maps(names)
+            name_numbers = {
+                name: number for name, number in self.tomo_name_to_number.items()
+            }
 
-            # Sanity check names
-            first_name = names[0]
-            if "_" not in first_name:
-                raise UserError(
-                    'Encountered particle without "_" in rlnTomoName. Aborting.'
-                )
+            # Keep the old prefix metadata when it is available so newly
+            # created particles can still be written with a sensible fallback.
+            first_name = str(names[0]) if names else ""
+            if "_" in first_name:
+                full = first_name.split("_")
+                self.name_prefix = "_".join(full[0:-1])
+                if full[-1].isdigit():
+                    self.name_leading_zeros = len(full[-1])
 
-            full = first_name.split("_")
-            prefix_guess = "".join(full[0:-1])
-            num_guess = full[-1]
-
-            for n in names:
-                if "_" not in n:
-                    raise UserError(
-                        'Encountered particle without "_" in rlnTomoName. Aborting.'
-                    )
-
-                full = n.split("_")
-                prefix_test = "".join(full[0:-1])
-
-                if prefix_test != prefix_guess:
-                    raise UserError(
-                        "Encountered particles with inconsistent "
-                        "rlnTomoName prefixes {} and {}. Aborting.".format(
-                            prefix_test, prefix_guess
-                        )
-                    )
-
-            self.name_prefix = prefix_guess
-            self.name_leading_zeros = len(num_guess)
             names_present = True
             additional_keys.remove("rlnTomoName")
         else:
@@ -265,9 +281,7 @@ class RELIONParticleData(ParticleData):
 
             # Name
             if names_present:
-                n = row["rlnTomoName"].split("_")
-                num = int(n[-1])
-                p["rlnTomoName"] = num
+                p["rlnTomoName"] = name_numbers[str(row["rlnTomoName"])]
 
             # Position
             p["pos_x"] = row["rlnCoordinateX"]
@@ -335,11 +349,24 @@ class RELIONParticleData(ParticleData):
                 data["rlnOriginY"][idx] *= -1
                 data["rlnOriginZ"][idx] *= -1
 
-        if self.name_prefix is not None:
+        if self.tomo_number_to_name:
             for idx, n in enumerate(data["rlnTomoName"]):
-                fmt = "{{}}_{{:0{}d}}".format(self.name_leading_zeros)
+                original_name = _mapped_tomogram_name(n, self.tomo_number_to_name)
+                if original_name is not None:
+                    data["rlnTomoName"][idx] = original_name
+                elif self.name_prefix is not None:
+                    leading_zeros = self.name_leading_zeros or 0
+                    fmt = "{{}}_{{:0{}d}}".format(leading_zeros)
+                    data["rlnTomoName"][idx] = fmt.format(
+                        self.name_prefix, int(float(n))
+                    )
+
+        elif self.name_prefix is not None:
+            leading_zeros = self.name_leading_zeros or 0
+            for idx, n in enumerate(data["rlnTomoName"]):
+                fmt = "{{}}_{{:0{}d}}".format(leading_zeros)
                 data["rlnTomoName"][idx] = fmt.format(
-                    self.name_prefix, data["rlnTomoName"][idx]
+                    self.name_prefix, int(float(data["rlnTomoName"][idx]))
                 )
         else:
             # for manually adding name for column rlnTomoName

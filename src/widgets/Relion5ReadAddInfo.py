@@ -1,7 +1,7 @@
 # vim: set expandtab shiftwidth=4 softtabstop=4:
 
 #Qt
-from Qt.QtWidgets import QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton, QMessageBox, QComboBox, QGridLayout, QHBoxLayout, QFrame, QToolButton
+from Qt.QtWidgets import QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton, QMessageBox, QComboBox, QGridLayout, QHBoxLayout, QFrame
 
 
 class CoordInputDialogRead(QDialog):
@@ -13,8 +13,6 @@ class CoordInputDialogRead(QDialog):
         self.y_input = None
         self.z_input = None
         self.pixsize_input = None
-        self.prefix_input = None
-        #self.suffix_input = None
         self.vol_combobox = None
 
         # Initialize the UI
@@ -51,9 +49,6 @@ class CoordInputDialogRead(QDialog):
         self.y_input = QLineEdit()
         self.z_input = QLineEdit()
         self.pixsize_input = QLineEdit()
-        self.prefix_input = QLineEdit()
-        #self.suffix_input = QLineEdit()
-
 
         # Horizontal layout for X, Y, Z
         xyz_layout = QHBoxLayout()
@@ -80,25 +75,6 @@ class CoordInputDialogRead(QDialog):
         separator.setFrameShape(QFrame.HLine)  # Horizontal line
         separator.setFrameShadow(QFrame.Sunken)
         layout.addWidget(separator)
-
-        # Create labels and input fields for prefix with tooltip
-        prefix_layout = QHBoxLayout()
-        prefix_layout.addWidget(QLabel("Prefix:"))
-
-
-        # Add a tooltip button
-        prefix_tooltip_button = QToolButton()
-        prefix_tooltip_button.setText("?")
-        prefix_tooltip_button.setToolTip(
-            "Enter the prefix that preceds the tomogram number in 'rlnTomoName'. \nFor example, enter 'tomo_' for entries like tomo_17, tomo_18 ,etc.")
-        prefix_layout.addWidget(prefix_tooltip_button)
-        prefix_layout.addWidget(self.prefix_input)
-
-        layout.addLayout(prefix_layout)
-        #layout.addWidget(QLabel("Enter Tomogram number suffix in 'rlnTomoName':"))
-        #layout.addWidget(self.suffix_input)
-
-
 
         # Submit button
         submit_button = QPushButton("Submit")
@@ -135,20 +111,17 @@ class CoordInputDialogRead(QDialog):
             y_size = int(self.y_input.text())
             z_size = int(self.z_input.text())
             pixsize = float(self.pixsize_input.text())  # Get the name as a string
-            prefix = self.prefix_input.text() or None
-            #suffix = self.suffix_input.text() or None
-            suffix = None
 
             # Return the values and accept the dialog
             self.accept()
 
             # Return the coordinates as a tuple
-            return x_size, y_size, z_size, pixsize, prefix, suffix
+            return x_size, y_size, z_size, pixsize, None, None
 
         except ValueError:
             # If there's a validation error, show a message
-            QMessageBox.warning(self, "Input Error", "Please enter valid integer values for X, Y, Z and for the pixelsize and strings for the prefix.")
-            return None, None, None, None, None, #None
+            QMessageBox.warning(self, "Input Error", "Please enter valid integer values for X, Y, Z and for the pixelsize.")
+            return None, None, None, None, None, None
 
     def get_info_read(self):
         """Returns the X, Y, Z coordinates and pixsize if valid, or None if the user cancels the dialog."""

@@ -7,7 +7,6 @@ import starfile
 import pandas as pd
 from scipy.sparse.csgraph import depth_first_order
 from scipy.spatial.transform import Rotation as R
-import os
 
 # Chimerax
 import chimerax
@@ -20,7 +19,11 @@ from chimerax.map import Volume
 # This package
 from ..formats import ArtiaXFormat, ArtiaXOpenerInfo, ArtiaXSaverInfo
 from ..ParticleData import ParticleData, EulerRotation
-from ..RELION.RELIONParticleData import RELIONEulerRotation
+from ..RELION.RELIONParticleData import (
+    RELIONEulerRotation,
+    _mapped_tomogram_name,
+    _tomogram_name_number_maps,
+)
 
 from ...widgets.SaveArgsWidget import SaveArgsWidget
 
@@ -81,6 +84,8 @@ class RELION5ParticleData(ParticleData):
         self.loop_name = 0
         self.name_prefix = None
         self.name_leading_zeros = None
+        self.tomo_name_to_number = {}
+        self.tomo_number_to_name = {}
 
         self.dimensions = dimensions
         self.voxelsize = voxelsize
@@ -104,23 +109,10 @@ class RELION5ParticleData(ParticleData):
         """Reads RELION5 star file."""
         #print("import as relion5")
         ### Collect all necessary information for computation
-        #Validate information
-        if self.prefix is not None:
-            prefix = self.prefix
-            #print(f"Using prefix: {prefix}")
-            #Save prefix from import to later input as default in saving widget
-            model_name = os.path.basename(self.file_name)
-            # Add to the dictionary instead of overwriting it
-            if not hasattr(self.session, 'rel5_import_prefix'):
-                self.session.rel5_import_prefix = {}  # Initialize the dictionary if it doesn't exist
-
-            # Set or update the prefix for the current model
-            self.session.rel5_import_prefix[model_name] = prefix
-            #print(self.session.rel5_import_prefix[model_name])
-
-        if self.suffix is not None:
-            suffix = self.suffix
-            #print(f"Using suffix: {suffix}")
+        # Tomogram names are mapped directly to 1..N below, so read-time
+        # prefix/suffix values must not affect import.
+        prefix = None
+        suffix = None
 
         #check for dimensions
         if self.dimensions is not None and len(self.dimensions) == 3 and self.voxelsize is not None:
@@ -136,6 +128,8 @@ class RELION5ParticleData(ParticleData):
             # get information through widget about tomogram size and pixelsize
             dialog = CoordInputDialogRead(self.session)
             x_size, y_size, z_size, pixsize, prefix, suffix = dialog.get_info_read()
+            prefix = None
+            suffix = None
             print(f"Using sizes: X: {x_size}, Y: {y_size}, Z: {z_size}")
             print(f"Using pixelsize: {pixsize}")
             #print(f"Using prefix: {prefix}")
@@ -178,55 +172,33 @@ class RELION5ParticleData(ParticleData):
 
         # Do we have tomo names?
         names_present = False
+        name_numbers = {}
         if "rlnTomoName" in df_keys:
             names = list(df["rlnTomoName"])
-
-            # Sanity check names
-            first_name = names[0]
-
-            # Ensure proper handling of prefix and suffix
-            if prefix:  # Only check if prefix is not None or empty
-                if first_name.startswith(prefix):
-                    if suffix:  # Check if suffix is not empty or None
-                        if first_name.endswith(suffix):
-                            num = first_name[len(prefix): -len(suffix)]
-                        else:
-                            raise UserError('Tomogram number cannot be extracted due to unmatched suffix.')
-                    else:
-                        # If suffix is empty or None, just get the part after the prefix
-                        num = first_name[len(prefix):]
-                else:
-                    raise UserError('Tomogram number cannot be extracted due to unmatched prefix.')
-            else:
-                # No prefix specified, only handle suffix if present
-                if suffix:
-                    if first_name.endswith(suffix):
-                        num = first_name[:-len(suffix)]  # Get the part before the suffix
-                    else:
-                        raise UserError('Tomogram number cannot be extracted due to unmatched suffix.')
-                else:
-                    num = first_name  # No prefix or suffix, just use the whole name
-
+            (
+                _,
+                self.tomo_name_to_number,
+                self.tomo_number_to_name,
+            ) = _tomogram_name_number_maps(names)
+            name_numbers = {
+                name: number for name, number in self.tomo_name_to_number.items()
+            }
             self.name_prefix = prefix
-            if isinstance(num, int):
-                self.name_leading_zeros = None
-            else:
-                self.name_leading_zeros = len(num)
-
-            # Process the rest of the names
-            for n in names:
-                if prefix and not n.startswith(prefix):
-                    raise UserError('Encountered particle without matching prefix in rlnTomoName. Aborting.')
-
-                if suffix:
-                    if n.endswith(suffix):
-                        num = n[len(prefix): -len(suffix)] if prefix else n[:-len(
-                            suffix)]  # Handle with or without prefix
-                    else:
-                        raise UserError('Encountered particle without matching suffix in rlnTomoName. Aborting.')
+            first_name = str(names[0]) if names else ""
+            if prefix and first_name.startswith(prefix):
+                if suffix and first_name.endswith(suffix):
+                    num = first_name[len(prefix): -len(suffix)]
                 else:
-                    num = n[len(prefix):] if prefix else n  # Handle the case where there's no suffix
-
+                    num = first_name[len(prefix):]
+                if num.isdigit():
+                    self.name_leading_zeros = len(num)
+            elif not prefix and suffix and first_name.endswith(suffix):
+                num = first_name[:-len(suffix)]
+                if num.isdigit():
+                    self.name_leading_zeros = len(num)
+            elif not prefix and not suffix:
+                if first_name.isdigit():
+                    self.name_leading_zeros = len(first_name)
 
             names_present = True
             additional_keys.remove("rlnTomoName")
@@ -323,28 +295,7 @@ class RELION5ParticleData(ParticleData):
 
             # Name
             if names_present:
-                n = row['rlnTomoName']
-
-                if suffix:  # Check if suffix is provided
-                    if n.endswith(suffix):
-                        if prefix:  # Check if prefix is provided
-                            num = n[len(prefix): -len(suffix)]  # Extract the part between prefix and suffix
-                        else:
-                            num = n[:-len(suffix)]  # No prefix, extract everything before the suffix
-                    else:
-                        num = None  # Handle the case where the suffix doesn't match
-                else:
-                    if prefix:  # Check if prefix is provided
-                        num = n[len(prefix):]  # Extract the part after the prefix
-                    else:
-                        num = n  # No prefix or suffix, use the full name
-
-                # Attempt to convert num to float and raise error if it fails
-                try:
-                    num = float(num)
-                    p['rlnTomoName'] = num
-                except ValueError:
-                    raise UserError(f"Tomogram number could not be extracted from {n}, failed to convert to float.")
+                p['rlnTomoName'] = name_numbers[str(row['rlnTomoName'])]
 
 
             #Coordinate
@@ -523,6 +474,12 @@ class RELION5ParticleData(ParticleData):
                         data['rlnTomoName'][idx] = f"{tomogram_name}{suffix}"
                     else:
                         data['rlnTomoName'][idx] = f"{formatted_num}{suffix}"
+
+        elif self.tomo_number_to_name and prefix is None and suffix is None:
+            for idx, n in enumerate(data['rlnTomoName']):
+                original_name = _mapped_tomogram_name(n, self.tomo_number_to_name)
+                if original_name is not None:
+                    data['rlnTomoName'][idx] = original_name
 
         elif tomogram_name is None:  # no overwriting desired
             # get tomo numbers from internal particle list data
@@ -767,18 +724,8 @@ class RELION5OpenerInfo(ArtiaXOpenerInfo):
 
         get_singleton(session)
 
-        #rlnTomoName
-        prefix_input = kwargs.get("prefix", None)
-        suffix_input = kwargs.get("suffix", None)
-
-        if prefix_input is not None:
-            prefix = prefix_input
-        else:
-            prefix = None
-        if suffix_input is not None:
-            suffix = suffix_input
-        else:
-            suffix = None
+        prefix = None
+        suffix = None
 
         #Dimensions
         # Users can either:
@@ -828,11 +775,10 @@ class RELION5OpenerInfo(ArtiaXOpenerInfo):
         elif (dimensions is None and volume is None) or (voxelsize is None and volume is None):
             from ...widgets.Relion5ReadAddInfo import CoordInputDialogRead
             print("Information is missing, opening input window")
-            #print("Example for expected Syntax: open /your/path/relion5_file.star format relion5 voldim 896,696,250 voxelsize 11.52 prefix TS_ ")
-            #print("Example for expected Syntax: open /your/path/relion5_file.star format relion5 volume #1.1.1 prefix tomo ")
-            #print("Please provide either a volume or the volume dimensions and pixelsize of your tomogram. To correctly read the column 'rlnTomoName' in the star file, the desired prefix that preceeds the tomogram number can be specified")
             dialog = CoordInputDialogRead(session)
             x, y, z, voxelsize, prefix, suffix = dialog.get_info_read()
+            prefix = None
+            suffix = None
             dimensions = x,y,z
 
 
@@ -855,9 +801,9 @@ class RELION5OpenerInfo(ArtiaXOpenerInfo):
 
     @property
     def open_args(self):
-        from chimerax.core.commands import FloatArg, Float3Arg, ModelArg, StringArg
+        from chimerax.core.commands import FloatArg, Float3Arg, ModelArg
 
-        return {"voldim": Float3Arg, "voxelsize": FloatArg, "volume": ModelArg, "prefix": StringArg, "suffix": StringArg}
+        return {"voldim": Float3Arg, "voxelsize": FloatArg, "volume": ModelArg}
 
 
 class RELION5SaveArgsWidget(SaveArgsWidget):
@@ -865,7 +811,8 @@ class RELION5SaveArgsWidget(SaveArgsWidget):
     def __init__(self, session, category="particle list", parent=None):
         super().__init__(session, category, parent)
 
-        # Add the combo box and connect the signal for changing of particle list selection so that prefix default is adjusted
+        # Keep the prefix field empty by default so imported tomogram names are
+        # preserved unless the user explicitly enters an override.
         self.model_combo.currentIndexChanged.connect(self.update_prefix)
 
 
@@ -1030,16 +977,7 @@ class RELION5SaveArgsWidget(SaveArgsWidget):
         return [self._main], []
 
     def update_prefix(self):
-        # Get the selected model name from the combo box
-        selected_model_text = self.model_combo.currentText()  # Get the current text from the combo box
-        model_name = selected_model_text.split(" - ")[1] if selected_model_text else ""  # Extract the model name
-
-        if not hasattr(self.session, 'rel5_import_prefix'):
-            self.session.rel5_import_prefix = {}  # Initialize the dictionary if it doesn't exist, e.g. when read as relion or em
-        default_prefix = self.session.rel5_import_prefix.get(model_name, "")  # Get prefix or empty string
-
-        # Update the QLineEdit with the new prefix
-        self._keep_name_prefix_edit.setText(default_prefix)
+        self._keep_name_prefix_edit.setText("")
 
     def _on_vol_combobox(self, idx) -> None:
         vol = self._vol_combobox.itemData(idx)
