@@ -169,6 +169,21 @@ class RELIONParticleData(ParticleData):
             if "rlnCoordinateZ" in list(val.keys()):
                 data_loop = key
                 break
+            elif "wrpCoordinateZ1" in list(val.keys()):
+                # Warp/M starfile: rename the relevant wrp* columns to their rln* equivalents.
+                self.session.logger.info("Changing Warp/M starfile columns to RELION format.")
+                wrp_to_rln = [('wrpCoordinateX1', 'rlnCoordinateX'),
+                              ('wrpCoordinateY1', 'rlnCoordinateY'),
+                              ('wrpCoordinateZ1', 'rlnCoordinateZ'),
+                              ('wrpAngleRot1', 'rlnAngleRot'),
+                              ('wrpAngleTilt1', 'rlnAngleTilt'),
+                              ('wrpAnglePsi1', 'rlnAnglePsi'), ]
+                for old, new in wrp_to_rln:
+                    if old in val.columns:
+                        self.session.logger.info("Renaming {} to {}.".format(old, new))
+                        val.rename(columns={old: new}, inplace=True)
+                data_loop = key
+                break
 
         # Abort if none found
         if data_loop is None:
@@ -265,7 +280,7 @@ class RELIONParticleData(ParticleData):
         # Additional data (everything that is a number)
         additional_entries = []
         for key in additional_keys:
-            if np.issubdtype(df.dtypes[key], np.number):
+            if pd.api.types.is_numeric_dtype(df.dtypes[key]):
                 additional_entries.append(key)
                 self._data_keys[key] = []
             else:
@@ -276,6 +291,8 @@ class RELIONParticleData(ParticleData):
 
         # Now make particles
         df.reset_index()
+
+        _raised_tomoname_parse_error = False
         for idx, row in df.iterrows():
             p = self.new_particle()
 
